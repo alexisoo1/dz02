@@ -1,0 +1,10 @@
+*.pdf
+*.txt
+!requirements.txt
+.venv/**/*.*
+*.log
+data/**/*.*
+.project
+*.db
+*pycache*/**/*
+*.dbeaver
