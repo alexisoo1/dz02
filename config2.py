@@ -1,5 +1,5 @@
 import logging
-dbName = 'vac'
+dbName = 'vac2'
 dbuser = 'test'
 dbpassword = '12345'
 loggerLevel = logging.ERROR

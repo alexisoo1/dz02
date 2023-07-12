@@ -4,7 +4,9 @@ from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 from sqlalchemy import URL
-from sqlalchemy import select
+from sqlalchemy import MetaData
+from sqlalchemy import Table, Column, Integer, String
+from sqlalchemy import select, insert, update, delete
 from typing import Optional
 from typing import List
 import config
@@ -13,20 +15,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 
-logger = logging.getLogger(__name__)
-logger.setLevel(config.loggerLevel)
-lfm = logging.Formatter(config.formatter)
-lsh = logging.StreamHandler()
-lsh.setLevel(config.streamLogHandlerLevel)
-lsh.setFormatter(lfm)
-lfh = logging.FileHandler(filename='log.log', mode='w')
-lfh.setFormatter(lfm)
-lfh.setLevel(config.fileLogHandlerLevel)
-logger.addHandler(lsh)
-logger.addHandler(lfh)
-
-#url = "postgresql+psycopg2://test:12345@localhost:5433/postgres"
-url_object = URL.create("postgresql+psycopg2", username="test", password="12345", host="localhost", database="vac", port=5432)
+url_object = URL.create("postgresql+psycopg2", username=config.dbuser, password=config.dbpassword, host="localhost", database=config.dbName, port=5432)
 
 print(url_object)
 
@@ -46,6 +35,7 @@ class vacancies(Base):
     company_name: Mapped[str] 
     position: Mapped[str]
     job_description: Mapped[str] 
+    link: Mapped[str] 
     key_skills: Mapped[str] #= mapped_column(primary_key=True)
 
     # Текстовое представление объекта
@@ -55,22 +45,90 @@ class vacancies(Base):
 # Создаем таблицу
 Base.metadata.create_all(engine)
 
-# new_vac = vacancies(id=1, company_name='Анна', position='ppp', job_description='ddd', key_skills='')
-# with Session(engine) as session:
-#     session.add(new_vac)
-#     session.commit()
+urlBase = f'https://hh.ru/search/vacancy?text={config.searchText}&area=1'
 
-result = requests.get(config.url, headers=config.user_agent)
+i = 0
+j = 0
+lines = []
+while True:
+    if i >=1:
+        url = f'{urlBase}&page={i}'
+    else:
+        url = urlBase
 
-print(result.status_code)
+    result = requests.get(url, headers=config.user_agent)
+    i+=1
 
-# Создаем объект soup на основе загруженной Web-страницы
-soup = BeautifulSoup(result.content.decode(), 'lxml')
+    print(result.status_code)
 
-print(soup.prettify())
+    with open(f'page.txt{i}', 'w', encoding='UTF-8') as f:
+        f.write(result.content.decode())
+    # Создаем объект soup на основе загруженной Web-страницы
+    soup = BeautifulSoup(result.content.decode(), 'lxml')
+    
+    names = soup.find_all('a', attrs={'data-qa': 'serp-item__title'})
+    ln = len(names)
+    if ln == 0:
+        break
+    print(ln)
+    if i > 10:
+        break
+    for name in names:
+        j+=1
+        lines.append(vacancies(id=j, company_name='', position=name.text, job_description='', link=name.get('href'), key_skills=''))
 
-name = soup.find('h1')
+print('!!!!!!!!!!! end of loop')
+print(len(lines))
 
-name = soup.find('a', attrs={'data-qa': 'vacancy-company-name'})
+with Session(engine) as session:
+    for line in lines:
+        session.add(line)
+    session.commit()
 
+stmt = select(vacancies)
+print(stmt)
+with engine.connect() as conn:
+    results = conn.execute(stmt)
+    for row in results:
+
+        result = requests.get(row.link, headers=config.user_agent)
+
+        print(result.status_code)
+
+        # Создаем объект soup на основе загруженной Web-страницы
+        soup = BeautifulSoup(result.content.decode(), 'lxml')
+        
+        pos = soup.find('h1')
+        if pos:
+            print(pos.text)
+            print(pos.attrs)
+        
+        com = soup.find('a', attrs={'data-qa': 'vacancy-company-name'})
+        if com:
+            print(com.text)
+
+        com = soup.find('div', {"class": "vacancy-company-details"})
+        if com:
+            print(com.text)
+
+        des = soup.find('div', {"class": "g-user-content"}) 
+        if des:
+            print(des.text)
+
+        ski = soup.find('div', {"class": "bloko-tag-list"}) 
+        skills = []
+        if ski:
+            for s in ski:
+                print(s.text)
+                skills.append(s.text)
+            print(ski.text)
+        session = Session(engine)
+        vac = session.execute(select(vacancies).where(vacancies.id == row.id)).scalar_one()
+        vac.company_name = com.text
+        vac.position = pos.text
+        vac.job_description = des.text
+        vac.key_skills = ','.join(skills)
+        session.commit()
+        session.close()
+    
 print('end')
